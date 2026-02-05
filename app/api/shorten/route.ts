@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { API_ENDPOINTS } from "@/lib/api-config"
+import { API_CONFIG, API_ENDPOINTS } from "@/lib/api-config"
 
 export async function POST(request: NextRequest) {
   try {
@@ -39,10 +39,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Return response matching Lambda API format
+    // Generate shortUrl using custom domain (without /dev/)
+    const shortUrl = `${API_CONFIG.BASE_URL}/${data.urlId}`
+
+    // Return response with corrected shortUrl
     return NextResponse.json({
       urlId: data.urlId,
-      shortUrl: data.shortUrl,
+      shortUrl,
       originalUrl: data.originalUrl,
       createdAt: data.createdAt,
       expiresAt: data.expiresAt,
