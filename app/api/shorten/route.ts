@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createShortUrl, initializeMockData } from "@/lib/url-store"
+import { API_ENDPOINTS } from "@/lib/api-config"
 
 export async function POST(request: NextRequest) {
   try {
-    // Initialize mock data on first request
-    initializeMockData()
-
     const body = await request.json()
     const { url } = body
 
@@ -16,27 +13,43 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate URL
-    try {
-      new URL(url)
-    } catch {
+    // Validate URL format
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
       return NextResponse.json(
-        { error: "Invalid URL" },
+        { error: "URL must start with http:// or https://" },
         { status: 400 }
       )
     }
 
-    const entry = createShortUrl(url)
-    const host = request.headers.get("host") || "localhost:3000"
-    const protocol = host.includes("localhost") ? "http" : "https"
-    const shortUrl = `${protocol}://${host}/s/${entry.shortCode}`
-
-    return NextResponse.json({
-      shortUrl,
-      shortCode: entry.shortCode,
-      originalUrl: entry.originalUrl
+    // Call Lambda API
+    const response = await fetch(API_ENDPOINTS.SHORTEN, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ url }),
     })
-  } catch {
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: data.error || "Failed to shorten URL" },
+        { status: response.status }
+      )
+    }
+
+    // Return response matching Lambda API format
+    return NextResponse.json({
+      urlId: data.urlId,
+      shortUrl: data.shortUrl,
+      originalUrl: data.originalUrl,
+      createdAt: data.createdAt,
+      expiresAt: data.expiresAt,
+    }, { status: 201 })
+
+  } catch (error) {
+    console.error("Shorten API error:", error)
     return NextResponse.json(
       { error: "Failed to shorten URL" },
       { status: 500 }

@@ -1,118 +1,175 @@
-import { NextResponse } from "next/server"
-import { getAllUrls, initializeMockData } from "@/lib/url-store"
+import { NextRequest, NextResponse } from "next/server"
+import { API_ENDPOINTS } from "@/lib/api-config"
 
-export async function GET() {
-  // Initialize mock data
-  initializeMockData()
+interface LambdaSiteStats {
+  totalUrls: number
+  totalClicks: number
+  todayClicks: number
+  yesterdayClicks: number
+  popularUrls: {
+    urlId: string
+    shortUrl: string
+    originalUrl: string
+    clickCount: number
+    createdAt: string
+  }[]
+  recentUrls: {
+    urlId: string
+    shortUrl: string
+    originalUrl: string
+    clickCount: number
+    createdAt: string
+  }[]
+}
 
-  const urls = getAllUrls()
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000)
-
-  // Calculate total stats
-  const totalClicks = urls.reduce((sum, url) => sum + url.clicks.length, 0)
-  const totalUrls = urls.length
-
-  // Popular URLs (for site overview)
-  const popularUrls = urls
-    .map(url => ({
-      shortCode: url.shortCode,
-      originalUrl: url.originalUrl,
-      clicks: url.clicks.length,
-      createdAt: url.createdAt.toISOString()
-    }))
-    .sort((a, b) => b.clicks - a.clicks)
-    .slice(0, 10)
-
-  // Per-URL statistics
-  const urlStats = urls.map(url => {
-    // Today's clicks
-    const todayClicks = url.clicks.filter(click => {
-      const clickDate = new Date(click.timestamp)
-      return clickDate >= today
-    }).length
-
-    // Yesterday's clicks
-    const yesterdayClicks = url.clicks.filter(click => {
-      const clickDate = new Date(click.timestamp)
-      return clickDate >= yesterday && clickDate < today
-    }).length
-
-    // Clicks by hour (last 24 hours)
-    const clicksByHour: { hour: string; clicks: number }[] = []
-    for (let i = 23; i >= 0; i--) {
-      const hour = new Date(now.getTime() - i * 60 * 60 * 1000)
-      const hourStr = hour.getHours().toString().padStart(2, "0") + ":00"
-      const clicks = url.clicks.filter(click => {
-        const clickTime = new Date(click.timestamp)
-        const hourStart = new Date(hour.getFullYear(), hour.getMonth(), hour.getDate(), hour.getHours())
-        const hourEnd = new Date(hourStart.getTime() + 60 * 60 * 1000)
-        return clickTime >= hourStart && clickTime < hourEnd
-      }).length
-      clicksByHour.push({ hour: hourStr, clicks })
+interface LambdaUrlStats {
+  urlId: string
+  shortUrl: string
+  originalUrl: string
+  createdAt: string
+  stats: {
+    totalClicks: number
+    todayClicks: number
+    yesterdayClicks: number
+    hourlyClicks: { hour: number; clicks: number }[]
+    dailyClicks: { date: string; clicks: number }[]
+    deviceDistribution: {
+      desktop: number
+      mobile: number
+      tablet: number
     }
+    refererDistribution: Record<string, number>
+  }
+}
 
-    // Daily clicks (last 7 days)
-    const dailyClicks: { date: string; clicks: number }[] = []
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000)
-      const dateStr = `${date.getMonth() + 1}/${date.getDate()}`
-      const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000)
-      const clicks = url.clicks.filter(click => {
-        const clickDate = new Date(click.timestamp)
-        return clickDate >= dayStart && clickDate < dayEnd
-      }).length
-      dailyClicks.push({ date: dateStr, clicks })
-    }
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const shortCode = searchParams.get("shortCode")
 
-    // Device stats for this URL
-    const deviceMap = new Map<string, number>()
-    url.clicks.forEach(click => {
-      let device = "Desktop"
-      if (click.userAgent.includes("iPhone") || click.userAgent.includes("Android")) {
-        device = click.userAgent.includes("iPhone") ? "iPhone" : "Android"
-      } else if (click.userAgent.includes("Macintosh")) {
-        device = "Mac"
-      } else if (click.userAgent.includes("Windows")) {
-        device = "Windows"
+    // If shortCode is provided, get stats for specific URL
+    if (shortCode) {
+      const response = await fetch(API_ENDPOINTS.STATS_BY_CODE(shortCode))
+      
+      if (!response.ok) {
+        const error = await response.json()
+        return NextResponse.json(
+          { error: error.error || "Failed to fetch URL stats" },
+          { status: response.status }
+        )
       }
-      deviceMap.set(device, (deviceMap.get(device) || 0) + 1)
-    })
-    const deviceStats = Array.from(deviceMap.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
 
-    // Referrer stats for this URL
-    const referrerMap = new Map<string, number>()
-    url.clicks.forEach(click => {
-      const referrer = click.referrer.replace(/^https?:\/\//, "").split("/")[0] || "direct"
-      referrerMap.set(referrer, (referrerMap.get(referrer) || 0) + 1)
-    })
-    const referrerStats = Array.from(referrerMap.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 6)
-
-    return {
-      shortCode: url.shortCode,
-      originalUrl: url.originalUrl,
-      totalClicks: url.clicks.length,
-      todayClicks,
-      yesterdayClicks,
-      clicksByHour,
-      dailyClicks,
-      deviceStats,
-      referrerStats,
-      createdAt: url.createdAt.toISOString()
+      const data: LambdaUrlStats = await response.json()
+      return NextResponse.json(transformUrlStats(data))
     }
-  }).sort((a, b) => b.totalClicks - a.totalClicks)
 
-  return NextResponse.json({
-    totalClicks,
-    totalUrls,
-    popularUrls,
-    urlStats
-  })
+    // Get overall site stats
+    const siteResponse = await fetch(API_ENDPOINTS.STATS)
+    
+    if (!siteResponse.ok) {
+      const error = await siteResponse.json()
+      return NextResponse.json(
+        { error: error.error || "Failed to fetch site stats" },
+        { status: siteResponse.status }
+      )
+    }
+
+    const siteStats: LambdaSiteStats = await siteResponse.json()
+
+    // Fetch detailed stats for each popular/recent URL
+    const allUrlIds = new Set<string>()
+    siteStats.popularUrls.forEach(url => allUrlIds.add(url.urlId))
+    siteStats.recentUrls.forEach(url => allUrlIds.add(url.urlId))
+
+    const urlStatsPromises = Array.from(allUrlIds).map(async (urlId) => {
+      try {
+        const response = await fetch(API_ENDPOINTS.STATS_BY_CODE(urlId))
+        if (response.ok) {
+          const data: LambdaUrlStats = await response.json()
+          return transformUrlStats(data)
+        }
+        return null
+      } catch {
+        return null
+      }
+    })
+
+    const urlStatsResults = await Promise.all(urlStatsPromises)
+    const urlStats = urlStatsResults.filter((stat): stat is NonNullable<typeof stat> => stat !== null)
+
+    // Transform to frontend expected format
+    return NextResponse.json({
+      totalClicks: siteStats.totalClicks,
+      totalUrls: siteStats.totalUrls,
+      todayClicks: siteStats.todayClicks,
+      yesterdayClicks: siteStats.yesterdayClicks,
+      popularUrls: siteStats.popularUrls.map(url => ({
+        shortCode: url.urlId,
+        originalUrl: url.originalUrl,
+        clicks: url.clickCount,
+        createdAt: url.createdAt,
+      })),
+      recentUrls: siteStats.recentUrls.map(url => ({
+        shortCode: url.urlId,
+        originalUrl: url.originalUrl,
+        clicks: url.clickCount,
+        createdAt: url.createdAt,
+      })),
+      urlStats,
+    })
+
+  } catch (error) {
+    console.error("Analytics API error:", error)
+    return NextResponse.json(
+      { error: "Failed to fetch analytics" },
+      { status: 500 }
+    )
+  }
+}
+
+function transformUrlStats(data: LambdaUrlStats) {
+  const { stats } = data
+
+  // Transform hourly clicks (hour number to "HH:00" format)
+  const clicksByHour = stats.hourlyClicks.map(h => ({
+    hour: h.hour.toString().padStart(2, "0") + ":00",
+    clicks: h.clicks,
+  }))
+
+  // Transform daily clicks
+  const dailyClicks = stats.dailyClicks.map(d => ({
+    date: formatDate(d.date),
+    clicks: d.clicks,
+  }))
+
+  // Transform device distribution
+  const deviceStats = [
+    { name: "Desktop", value: stats.deviceDistribution.desktop },
+    { name: "Mobile", value: stats.deviceDistribution.mobile },
+    { name: "Tablet", value: stats.deviceDistribution.tablet },
+  ].filter(d => d.value > 0)
+
+  // Transform referrer distribution
+  const referrerStats = Object.entries(stats.refererDistribution)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 6)
+
+  return {
+    shortCode: data.urlId,
+    originalUrl: data.originalUrl,
+    totalClicks: stats.totalClicks,
+    todayClicks: stats.todayClicks,
+    yesterdayClicks: stats.yesterdayClicks,
+    clicksByHour,
+    dailyClicks,
+    deviceStats,
+    referrerStats,
+    createdAt: data.createdAt,
+  }
+}
+
+function formatDate(dateStr: string): string {
+  const date = new Date(dateStr)
+  return `${date.getMonth() + 1}/${date.getDate()}`
 }

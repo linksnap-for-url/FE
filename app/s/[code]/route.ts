@@ -1,24 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getUrlByShortCode, recordClick, initializeMockData } from "@/lib/url-store"
+import { API_ENDPOINTS } from "@/lib/api-config"
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ code: string }> }
 ) {
-  // Initialize mock data
-  initializeMockData()
-
   const { code } = await params
-  const entry = getUrlByShortCode(code)
 
-  if (!entry) {
+  if (!code) {
     return NextResponse.redirect(new URL("/", request.url))
   }
 
-  // Record click
-  const referrer = request.headers.get("referer") || "direct"
-  const userAgent = request.headers.get("user-agent") || "unknown"
-  recordClick(code, referrer, userAgent)
-
-  return NextResponse.redirect(entry.originalUrl)
+  return NextResponse.redirect(API_ENDPOINTS.REDIRECT(code))
 }

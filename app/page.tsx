@@ -39,6 +39,11 @@ export default function HomePage() {
 
       const data = await response.json()
 
+      if (!response.ok) {
+        setError(data.error || "URL 단축 중 오류가 발생했습니다")
+        return
+      }
+
       if (data.shortUrl) {
         setShortenedUrl(data.shortUrl)
       }
