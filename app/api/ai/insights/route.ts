@@ -1,151 +1,88 @@
 import { NextRequest, NextResponse } from "next/server"
-import { generateText, Output } from "ai"
-import { z } from "zod"
+import { API_ENDPOINTS } from "@/lib/api-config"
 
-const urlInsightsSchema = z.object({
-  trafficPattern: z.string().describe("트래픽 패턴 분석 결과"),
-  referrerAnalysis: z.string().describe("유입 경로 분석 결과")
-})
-
-const siteInsightsSchema = z.object({
-  trendAnalysis: z.string().describe("전체 사이트 트렌드 분석 결과")
-})
-
-const marketingInsightsSchema = z.object({
-  targetAnalysis: z.string().describe("타겟 분석 및 마케팅 제안")
-})
+// Lambda AI Insights response type
+interface LambdaInsightsResponse {
+  analysis_type: string
+  data_summary: {
+    total_urls: number
+    total_clicks: number
+    top_referers: string[]
+    top_devices: string[]
+  }
+  ai_insights: string
+  generated_at: string
+  data_source: string
+}
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { type } = body
 
-    if (type === "url") {
-      const { urlStats } = body
-      
-      const prompt = `당신은 URL 단축 서비스의 데이터 분석 전문가입니다.
-
-## 분석 대상 URL
-- 단축 코드: /${urlStats.shortCode}
-- 원본 URL: ${urlStats.originalUrl}
-- 총 클릭: ${urlStats.totalClicks}회
-- 오늘 클릭: ${urlStats.todayClicks}회
-- 어제 클릭: ${urlStats.yesterdayClicks}회
-
-## 시간대별 클릭 데이터
-${urlStats.clicksByHour.map((h: { hour: string; clicks: number }) => `${h.hour}: ${h.clicks}회`).join(', ')}
-
-## 유입 경로
-${urlStats.referrerStats.map((r: { name: string; value: number }) => `- ${r.name}: ${r.value}회 (${((r.value / urlStats.totalClicks) * 100).toFixed(1)}%)`).join('\n')}
-
-## 디바이스 분포
-${urlStats.deviceStats.map((d: { name: string; value: number }) => `- ${d.name}: ${d.value}회`).join('\n')}
-
-다음 형식으로 분석 결과를 제공해주세요:
-
-1. 트래픽 패턴 분석 (trafficPattern):
-예시 형식:
-"이 URL은 [시간/요일]에 클릭이 급증해요.
-[패턴에 대한 해석]
-→ [구체적인 액션 제안]"
-
-2. 유입 경로 분석 (referrerAnalysis):
-예시 형식:
-"[주요 유입 채널]에서 [비율]% 유입되는데,
-[해당 채널 유저 특성]
-→ [콘텐츠 최적화 제안]"
-
-한국어로 자연스럽게, 친근한 말투로 작성해주세요.`
-
-      const result = await generateText({
-        model: "openai/gpt-4o-mini",
-        prompt,
-        output: Output.object({ schema: urlInsightsSchema })
-      })
-
-      return NextResponse.json(result.object)
+    // Map frontend types to Lambda API types
+    let analysisType: "full" | "traffic" | "conversion" = "full"
+    
+    if (type === "url" || type === "traffic") {
+      analysisType = "traffic"
+    } else if (type === "marketing" || type === "conversion") {
+      analysisType = "conversion"
+    } else if (type === "site" || type === "full") {
+      analysisType = "full"
     }
 
-    if (type === "site") {
-      const { analytics } = body
-      
-      const prompt = `당신은 URL 단축 서비스의 데이터 분석 전문가입니다.
+    // Call Lambda Bedrock API
+    const response = await fetch(API_ENDPOINTS.AI_INSIGHTS, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ type: analysisType }),
+    })
 
-## LinkSnap 전체 현황
-- 등록된 총 URL 수: ${analytics.totalUrls}개
-- 전체 클릭 수: ${analytics.totalClicks}회
-- URL당 평균 클릭: ${Math.round(analytics.totalClicks / analytics.totalUrls)}회
+    const data: LambdaInsightsResponse = await response.json()
 
-## 인기 URL 순위
-${analytics.popularUrls.slice(0, 5).map((u: { shortCode: string; originalUrl: string; clicks: number }, i: number) => 
-  `${i + 1}. /${u.shortCode} (${u.clicks}회) - ${u.originalUrl}`
-).join('\n')}
-
-다음 형식으로 트렌드 분석 결과를 제공해주세요:
-
-트렌드 분석 (trendAnalysis):
-예시 형식:
-"이번 주 인기 URL 카테고리:
-1. [카테고리1] ([비율]%)
-2. [카테고리2] ([비율]%)
-3. [카테고리3] ([비율]%)
-
-→ [트렌드에 대한 인사이트]"
-
-URL 패턴을 분석하여 카테고리를 추론해주세요 (쇼핑몰, 유튜브, 뉴스, SNS, 블로그 등).
-한국어로 자연스럽게, 친근한 말투로 작성해주세요.`
-
-      const result = await generateText({
-        model: "openai/gpt-4o-mini",
-        prompt,
-        output: Output.object({ schema: siteInsightsSchema })
-      })
-
-      return NextResponse.json(result.object)
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: "AI 분석 생성에 실패했습니다" },
+        { status: response.status }
+      )
     }
 
-    if (type === "marketing") {
-      const { urlStats } = body
-      
-      const prompt = `당신은 URL 단축 서비스의 마케팅 전문가입니다.
-
-## 분석 대상 URL
-- 단축 코드: /${urlStats.shortCode}
-- 원본 URL: ${urlStats.originalUrl}
-- 총 클릭: ${urlStats.totalClicks}회
-
-## 디바이스 분포
-${urlStats.deviceStats.map((d: { name: string; value: number }) => `- ${d.name}: ${d.value}회 (${((d.value / urlStats.totalClicks) * 100).toFixed(1)}%)`).join('\n')}
-
-## 유입 경로
-${urlStats.referrerStats.map((r: { name: string; value: number }) => `- ${r.name}: ${r.value}회 (${((r.value / urlStats.totalClicks) * 100).toFixed(1)}%)`).join('\n')}
-
-## 시간대별 클릭
-${urlStats.clicksByHour.map((h: { hour: string; clicks: number }) => `${h.hour}: ${h.clicks}회`).join(', ')}
-
-다음 형식으로 타겟 분석 결과를 제공해주세요:
-
-타겟 분석 (targetAnalysis):
-예시 형식:
-"이 URL 클릭 유저 특성:
-- [디바이스 비율 및 특성]
-- 주요 유입: [채널]
-- 활동 시간: [시간대]
-
-→ [추정 타겟층 및 마케팅 제안]"
-
-한국어로 자연스럽게, 친근한 말투로 작성해주세요.`
-
-      const result = await generateText({
-        model: "openai/gpt-4o-mini",
-        prompt,
-        output: Output.object({ schema: marketingInsightsSchema })
+    // Transform response based on requested type
+    if (type === "url" || type === "traffic") {
+      return NextResponse.json({
+        trafficPattern: data.ai_insights,
+        referrerAnalysis: extractSection(data.ai_insights, "채널") || data.ai_insights,
+        dataSummary: data.data_summary,
+        generatedAt: data.generated_at,
       })
-
-      return NextResponse.json(result.object)
     }
 
-    return NextResponse.json({ error: "Invalid type" }, { status: 400 })
+    if (type === "marketing" || type === "conversion") {
+      return NextResponse.json({
+        targetAnalysis: data.ai_insights,
+        dataSummary: data.data_summary,
+        generatedAt: data.generated_at,
+      })
+    }
+
+    if (type === "site" || type === "full") {
+      return NextResponse.json({
+        trendAnalysis: data.ai_insights,
+        dataSummary: data.data_summary,
+        generatedAt: data.generated_at,
+      })
+    }
+
+    // Default: return full insights
+    return NextResponse.json({
+      insights: data.ai_insights,
+      dataSummary: data.data_summary,
+      generatedAt: data.generated_at,
+      analysisType: data.analysis_type,
+    })
+
   } catch (error) {
     console.error("AI Insights error:", error)
     return NextResponse.json(
@@ -153,4 +90,27 @@ ${urlStats.clicksByHour.map((h: { hour: string; clicks: number }) => `${h.hour}:
       { status: 500 }
     )
   }
+}
+
+// Helper to extract specific section from markdown insights
+function extractSection(markdown: string, keyword: string): string | null {
+  const lines = markdown.split("\n")
+  let capturing = false
+  const result: string[] = []
+
+  for (const line of lines) {
+    if (line.toLowerCase().includes(keyword.toLowerCase()) && line.startsWith("#")) {
+      capturing = true
+      result.push(line)
+      continue
+    }
+    if (capturing) {
+      if (line.startsWith("#") && !line.toLowerCase().includes(keyword.toLowerCase())) {
+        break
+      }
+      result.push(line)
+    }
+  }
+
+  return result.length > 0 ? result.join("\n").trim() : null
 }
