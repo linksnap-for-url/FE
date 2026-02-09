@@ -1,7 +1,7 @@
 // Lambda API Configuration
 export const API_CONFIG = {
   BASE_URL: process.env.NEXT_PUBLIC_API_URL || "https://shmall.store",
-  AI_BASE_URL: process.env.NEXT_PUBLIC_AI_API_URL || "https://xfcvwvd00j.execute-api.ap-northeast-2.amazonaws.com/dev",
+  AI_BASE_URL: process.env.NEXT_PUBLIC_AI_API_URL || "https://dz7hctlcwk.execute-api.ap-northeast-2.amazonaws.com/dev",
 } as const
 
 // API Endpoints
