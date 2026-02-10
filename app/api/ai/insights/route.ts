@@ -4,11 +4,26 @@ import { API_ENDPOINTS } from "@/lib/api-config"
 // Lambda AI Insights response type
 interface LambdaInsightsResponse {
   analysis_type: string
-  data_summary: {
+  data_summary?: {
     total_urls: number
     total_clicks: number
     top_referers: string[]
     top_devices: string[]
+  }
+  model_info?: {
+    type: string
+    accuracy: number
+    auc_roc: number
+  }
+  rfm_summary?: {
+    segments: Record<string, { count: number }>
+  }
+  segmentation_summary?: {
+    clusters: Record<string, { count: number }>
+  }
+  product_summary?: {
+    total_products: number
+    total_revenue: number
   }
   ai_insights: string
   generated_at: string
@@ -21,7 +36,7 @@ export async function POST(request: NextRequest) {
     const { type } = body
 
     // Map frontend types to Lambda API types
-    let analysisType: "full" | "traffic" | "conversion" = "full"
+    let analysisType: "full" | "traffic" | "conversion" | "segmentation" = "full"
     
     if (type === "url" || type === "traffic") {
       analysisType = "traffic"
@@ -29,6 +44,8 @@ export async function POST(request: NextRequest) {
       analysisType = "conversion"
     } else if (type === "site" || type === "full") {
       analysisType = "full"
+    } else if (type === "segmentation") {
+      analysisType = "segmentation"
     }
 
     // Call Lambda Bedrock API
@@ -52,15 +69,22 @@ export async function POST(request: NextRequest) {
     // Parse sections from markdown
     const sections = parseMarkdownSections(data.ai_insights)
 
+    // Common extra fields from new response format
+    const extraFields = {
+      modelInfo: data.model_info || null,
+      rfmSummary: data.rfm_summary || null,
+      segmentationSummary: data.segmentation_summary || null,
+      productSummary: data.product_summary || null,
+      dataSource: data.data_source,
+    }
+
     // Transform response based on requested type
     if (type === "url" || type === "traffic") {
-      // 트래픽 패턴 분석: Only traffic pattern section
       const trafficSection = sections.find(s => 
         s.title.includes("트래픽") || s.title.includes("패턴")
       )
       const trafficPattern = trafficSection?.content || sections[0]?.content || data.ai_insights
 
-      // 유입 경로 분석: Channel/referrer related section
       const referrerSection = sections.find(s => 
         s.title.includes("채널") || s.title.includes("유입") || s.title.includes("경로")
       )
@@ -71,11 +95,11 @@ export async function POST(request: NextRequest) {
         referrerAnalysis: cleanMarkdown(referrerAnalysis),
         dataSummary: data.data_summary,
         generatedAt: data.generated_at,
+        ...extraFields,
       })
     }
 
     if (type === "marketing" || type === "conversion") {
-      // 마케팅 제안: Marketing, target, action items
       const marketingSections = sections.filter(s =>
         s.title.includes("마케팅") || 
         s.title.includes("타겟") || 
@@ -84,7 +108,6 @@ export async function POST(request: NextRequest) {
         s.title.includes("실행")
       )
       
-      // Renumber sections starting from 1
       const targetAnalysis = marketingSections.length > 0
         ? renumberAndCleanSections(marketingSections)
         : cleanMarkdown(data.ai_insights)
@@ -93,11 +116,25 @@ export async function POST(request: NextRequest) {
         targetAnalysis,
         dataSummary: data.data_summary,
         generatedAt: data.generated_at,
+        ...extraFields,
+      })
+    }
+
+    if (type === "segmentation") {
+      // 고객 세그멘테이션 전용
+      const trendAnalysis = sections.length > 0
+        ? renumberAndCleanSections(sections)
+        : cleanMarkdown(data.ai_insights)
+
+      return NextResponse.json({
+        segmentationAnalysis: trendAnalysis,
+        dataSummary: data.data_summary,
+        generatedAt: data.generated_at,
+        ...extraFields,
       })
     }
 
     if (type === "site" || type === "full") {
-      // Renumber all sections starting from 1
       const trendAnalysis = sections.length > 0
         ? renumberAndCleanSections(sections)
         : cleanMarkdown(data.ai_insights)
@@ -106,6 +143,7 @@ export async function POST(request: NextRequest) {
         trendAnalysis,
         dataSummary: data.data_summary,
         generatedAt: data.generated_at,
+        ...extraFields,
       })
     }
 
@@ -115,6 +153,7 @@ export async function POST(request: NextRequest) {
       dataSummary: data.data_summary,
       generatedAt: data.generated_at,
       analysisType: data.analysis_type,
+      ...extraFields,
     })
 
   } catch (error) {
@@ -135,19 +174,16 @@ interface ParsedSection {
 // Remove ### headers and clean up markdown
 function cleanMarkdown(text: string): string {
   return text
-    .replace(/^#{2,3}\s+\d*\.?\s*/gm, "") // Remove ## or ### with optional numbers
-    .replace(/^\s*\n/gm, "\n") // Remove empty lines at start
+    .replace(/^#{2,3}\s+\d*\.?\s*/gm, "")
+    .replace(/^\s*\n/gm, "\n")
     .trim()
 }
 
 // Renumber sections starting from 1 and remove ### headers
 function renumberAndCleanSections(sections: ParsedSection[]): string {
   return sections.map((section, index) => {
-    // Extract the title without the number prefix
     const titleWithoutNumber = section.title.replace(/^\d+\.\s*/, "").trim()
-    // Create new numbered title (without ###)
     const newTitle = `${index + 1}. ${titleWithoutNumber}`
-    // Combine with content
     return `${newTitle}\n${section.content.trim()}`
   }).join("\n\n")
 }
@@ -160,18 +196,15 @@ function parseMarkdownSections(markdown: string): ParsedSection[] {
   let currentSection: ParsedSection | null = null
   
   for (const line of lines) {
-    // Check if line is a header (## or ###)
     const headerMatch = line.match(/^(#{2,3})\s+(.+)$/)
     
     if (headerMatch) {
-      // Save previous section
       if (currentSection) {
         currentSection.content = currentSection.content.trim()
         currentSection.fullContent = currentSection.fullContent.trim()
         sections.push(currentSection)
       }
       
-      // Start new section
       const title = headerMatch[2]
       currentSection = {
         title,
@@ -184,7 +217,6 @@ function parseMarkdownSections(markdown: string): ParsedSection[] {
     }
   }
   
-  // Don't forget the last section
   if (currentSection) {
     currentSection.content = currentSection.content.trim()
     currentSection.fullContent = currentSection.fullContent.trim()
