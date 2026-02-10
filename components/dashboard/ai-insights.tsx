@@ -43,6 +43,66 @@ interface MarketingInsightData {
   targetAnalysis: string
 }
 
+// Check if a numbered line is a section title (short, title-like)
+function isSectionTitle(text: string): boolean {
+  // Section titles are typically short (under 25 characters) and contain keywords
+  const titleKeywords = ["인사이트", "분석", "제안", "플랜", "전략", "추천", "시간대", "액션", "아이템", "요약", "현황", "트렌드"]
+  const isShort = text.length < 25
+  const hasKeyword = titleKeywords.some(keyword => text.includes(keyword))
+  
+  // It's a title if it's short AND has a keyword, or if it's very short (likely just a title)
+  return (isShort && hasKeyword) || text.length < 15
+}
+
+// Component to render formatted insights with styled numbered headers
+function FormattedInsight({ text }: { text: string }) {
+  const lines = text.split("\n")
+  
+  return (
+    <div className="space-y-2">
+      {lines.map((line, index) => {
+        // Check if line starts with a number followed by period (e.g., "1.", "2.")
+        const numberedMatch = line.match(/^(\d+)\.\s+(.+)$/)
+        
+        if (numberedMatch) {
+          const content = numberedMatch[2]
+          
+          // Check if this is a section title or just a numbered content item
+          if (isSectionTitle(content)) {
+            // Section title - render with larger, bolder text
+            return (
+              <div key={index} className="mt-4 first:mt-0">
+                <h4 className="text-base font-semibold text-foreground">
+                  <span className="text-primary">{numberedMatch[1]}.</span> {content}
+                </h4>
+              </div>
+            )
+          } else {
+            // Numbered content item - normal size with number styling
+            return (
+              <p key={index} className="text-sm leading-relaxed text-foreground/90">
+                <span className="font-medium text-foreground">{numberedMatch[1]}.</span> {content}
+              </p>
+            )
+          }
+        }
+        
+        // Skip empty lines but keep spacing
+        if (line.trim() === "") {
+          return <div key={index} className="h-1" />
+        }
+        
+        // Regular text
+        return (
+          <p key={index} className="text-sm leading-relaxed text-foreground/90">
+            {line}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
+
 export function AiInsights({ analytics, selectedUrl }: AiInsightsProps) {
   const [urlInsights, setUrlInsights] = useState<UrlInsightData | null>(null)
   const [siteInsights, setSiteInsights] = useState<SiteInsightData | null>(null)
@@ -182,9 +242,7 @@ export function AiInsights({ analytics, selectedUrl }: AiInsightsProps) {
               )}
               {urlInsights?.trafficPattern ? (
                 <div className="rounded-lg bg-muted/50 p-4">
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                    {urlInsights.trafficPattern}
-                  </p>
+                  <FormattedInsight text={urlInsights.trafficPattern} />
                 </div>
               ) : (
                 <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4">
@@ -246,9 +304,7 @@ export function AiInsights({ analytics, selectedUrl }: AiInsightsProps) {
               )}
               {marketingInsights?.targetAnalysis ? (
                 <div className="rounded-lg bg-muted/50 p-4">
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                    {marketingInsights.targetAnalysis}
-                  </p>
+                  <FormattedInsight text={marketingInsights.targetAnalysis} />
                 </div>
               ) : (
                 <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4">
@@ -310,9 +366,7 @@ export function AiInsights({ analytics, selectedUrl }: AiInsightsProps) {
               )}
               {urlInsights?.referrerAnalysis ? (
                 <div className="rounded-lg bg-muted/50 p-4">
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                    {urlInsights.referrerAnalysis}
-                  </p>
+                  <FormattedInsight text={urlInsights.referrerAnalysis} />
                 </div>
               ) : (
                 <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4">
@@ -367,9 +421,7 @@ export function AiInsights({ analytics, selectedUrl }: AiInsightsProps) {
             )}
             {siteInsights?.trendAnalysis ? (
               <div className="rounded-lg bg-muted/50 p-4">
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                  {siteInsights.trendAnalysis}
-                </p>
+                <FormattedInsight text={siteInsights.trendAnalysis} />
               </div>
             ) : (
               <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4">
