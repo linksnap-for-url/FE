@@ -151,22 +151,22 @@ function transformUrlStats(data: LambdaUrlStats) {
 
   // Transform referrer distribution
   const referrerStats = Object.entries(stats.refererDistribution)
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 6)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6)
 
-  return {
+    return {
     shortCode: data.urlId,
     originalUrl: data.originalUrl,
     totalClicks: stats.totalClicks,
     todayClicks: stats.todayClicks,
     yesterdayClicks: stats.yesterdayClicks,
-    clicksByHour,
-    dailyClicks,
-    deviceStats,
-    referrerStats,
+      clicksByHour,
+      dailyClicks,
+      deviceStats,
+      referrerStats,
     createdAt: data.createdAt,
-  }
+    }
 }
 
 function formatDate(dateStr: string): string {

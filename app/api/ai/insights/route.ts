@@ -9,46 +9,26 @@ interface LambdaInsightsResponse {
     total_clicks: number
     top_referers: string[]
     top_devices: string[]
+    countries?: string[]
   }
   model_info?: {
     type: string
-    accuracy: number
-    auc_roc: number
+    accuracy: number | null
+    auc_roc: number | null
+    loaded: boolean
+    trained_at?: string | null
   }
-  rfm_summary?: {
-    segments: Record<string, { count: number }>
-  }
-  segmentation_summary?: {
-    clusters: Record<string, { count: number }>
-  }
-  product_summary?: {
-    total_products: number
-    total_revenue: number
-  }
+  conversion_prediction?: unknown | null
+  rfm_summary?: unknown | null
+  segmentation_summary?: unknown | null
+  product_summary?: unknown | null
   ai_insights: string
   generated_at: string
   data_source: string
 }
 
-export async function POST(request: NextRequest) {
+async function callLambdaInsights(analysisType: string): Promise<{ data: LambdaInsightsResponse | null; error: string | null; status: number }> {
   try {
-    const body = await request.json()
-    const { type } = body
-
-    // Map frontend types to Lambda API types
-    let analysisType: "full" | "traffic" | "conversion" | "segmentation" = "full"
-    
-    if (type === "url" || type === "traffic") {
-      analysisType = "traffic"
-    } else if (type === "marketing" || type === "conversion") {
-      analysisType = "conversion"
-    } else if (type === "site" || type === "full") {
-      analysisType = "full"
-    } else if (type === "segmentation") {
-      analysisType = "segmentation"
-    }
-
-    // Call Lambda Bedrock API
     const response = await fetch(API_ENDPOINTS.AI_INSIGHTS, {
       method: "POST",
       headers: {
@@ -57,80 +37,131 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({ type: analysisType }),
     })
 
-    const data: LambdaInsightsResponse = await response.json()
+    const data = await response.json()
 
     if (!response.ok) {
+      // Lambda에서 에러 응답이 온 경우
+      const errorMsg = data.error || "Lambda API 에러"
+      console.error(`Lambda AI Insights error (type: ${analysisType}):`, errorMsg)
+      return { data: null, error: errorMsg, status: response.status }
+    }
+
+    return { data, error: null, status: response.status }
+  } catch (err) {
+    console.error(`Lambda AI Insights fetch error (type: ${analysisType}):`, err)
+    return { data: null, error: "Lambda API 연결 실패", status: 500 }
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { type } = body
+
+    // Map frontend types to Lambda API types
+    let analysisType: string = "full"
+
+    if (type === "url" || type === "traffic" || type === "referrer") {
+      analysisType = "traffic"
+    } else if (type === "marketing" || type === "conversion") {
+      analysisType = "conversion"
+    } else if (type === "site" || type === "full") {
+      analysisType = "full"
+    } else if (type === "segmentation") {
+      analysisType = "full"
+    }
+
+    // 1차 시도: 원래 타입으로 호출
+    let result = await callLambdaInsights(analysisType)
+
+    // 2차 시도: 에러 발생 시 traffic으로 fallback
+    if (result.error && analysisType !== "traffic") {
+      console.log(`Falling back to traffic type (original: ${analysisType})`)
+      result = await callLambdaInsights("traffic")
+    }
+
+    // fallback도 실패하면 에러 반환
+    if (result.error || !result.data) {
       return NextResponse.json(
-        { error: "AI 분석 생성에 실패했습니다" },
-        { status: response.status }
+        { error: result.error || "AI 분석 생성에 실패했습니다" },
+        { status: result.status || 500 }
       )
     }
+
+    const data = result.data
 
     // Parse sections from markdown
     const sections = parseMarkdownSections(data.ai_insights)
 
-    // Common extra fields from new response format
-    const extraFields = {
-      modelInfo: data.model_info || null,
-      rfmSummary: data.rfm_summary || null,
-      segmentationSummary: data.segmentation_summary || null,
-      productSummary: data.product_summary || null,
-      dataSource: data.data_source,
-    }
+    // Model info (Bedrock only)
+    const modelInfo = data.model_info || null
 
     // Transform response based on requested type
     if (type === "url" || type === "traffic") {
-      const trafficSection = sections.find(s => 
+      const trafficSection = sections.find(s =>
         s.title.includes("트래픽") || s.title.includes("패턴")
       )
       const trafficPattern = trafficSection?.content || sections[0]?.content || data.ai_insights
 
-      const referrerSection = sections.find(s => 
-        s.title.includes("채널") || s.title.includes("유입") || s.title.includes("경로")
-      )
-      const referrerAnalysis = referrerSection?.content || sections[2]?.content || ""
-
       return NextResponse.json({
         trafficPattern: cleanMarkdown(trafficPattern),
+        dataSummary: data.data_summary,
+        generatedAt: data.generated_at,
+        modelInfo,
+      })
+    }
+
+    if (type === "referrer") {
+      const referrerSection = sections.find(s =>
+        s.title.includes("채널") || s.title.includes("유입") || s.title.includes("경로")
+      )
+      const referrerAnalysis = referrerSection?.content || sections[2]?.content || data.ai_insights
+
+      return NextResponse.json({
         referrerAnalysis: cleanMarkdown(referrerAnalysis),
         dataSummary: data.data_summary,
         generatedAt: data.generated_at,
-        ...extraFields,
+        modelInfo,
       })
     }
 
     if (type === "marketing" || type === "conversion") {
+      // conversion 타입이 BE에서 에러나면 traffic 응답으로 대체됨
+      // 마케팅 관련 섹션을 찾거나, 없으면 전체를 보여줌
       const marketingSections = sections.filter(s =>
-        s.title.includes("마케팅") || 
-        s.title.includes("타겟") || 
+        s.title.includes("마케팅") ||
+        s.title.includes("타겟") ||
         s.title.includes("전환") ||
         s.title.includes("액션") ||
-        s.title.includes("실행")
+        s.title.includes("실행") ||
+        s.title.includes("전략") ||
+        s.title.includes("채널")
       )
-      
+
       const targetAnalysis = marketingSections.length > 0
         ? renumberAndCleanSections(marketingSections)
-        : cleanMarkdown(data.ai_insights)
+        : sections.length > 0
+          ? renumberAndCleanSections(sections)
+          : cleanMarkdown(data.ai_insights)
 
       return NextResponse.json({
         targetAnalysis,
         dataSummary: data.data_summary,
         generatedAt: data.generated_at,
-        ...extraFields,
+        modelInfo,
       })
     }
 
     if (type === "segmentation") {
-      // 고객 세그멘테이션 전용
-      const trendAnalysis = sections.length > 0
+      const segmentationAnalysis = sections.length > 0
         ? renumberAndCleanSections(sections)
         : cleanMarkdown(data.ai_insights)
 
       return NextResponse.json({
-        segmentationAnalysis: trendAnalysis,
+        segmentationAnalysis,
         dataSummary: data.data_summary,
         generatedAt: data.generated_at,
-        ...extraFields,
+        modelInfo,
       })
     }
 
@@ -143,17 +174,17 @@ export async function POST(request: NextRequest) {
         trendAnalysis,
         dataSummary: data.data_summary,
         generatedAt: data.generated_at,
-        ...extraFields,
+        modelInfo,
       })
     }
 
-    // Default: return full insights
+    // Default
     return NextResponse.json({
       insights: data.ai_insights,
       dataSummary: data.data_summary,
       generatedAt: data.generated_at,
       analysisType: data.analysis_type,
-      ...extraFields,
+      modelInfo,
     })
 
   } catch (error) {
@@ -192,19 +223,19 @@ function renumberAndCleanSections(sections: ParsedSection[]): string {
 function parseMarkdownSections(markdown: string): ParsedSection[] {
   const sections: ParsedSection[] = []
   const lines = markdown.split("\n")
-  
+
   let currentSection: ParsedSection | null = null
-  
+
   for (const line of lines) {
     const headerMatch = line.match(/^(#{2,3})\s+(.+)$/)
-    
+
     if (headerMatch) {
       if (currentSection) {
         currentSection.content = currentSection.content.trim()
         currentSection.fullContent = currentSection.fullContent.trim()
         sections.push(currentSection)
       }
-      
+
       const title = headerMatch[2]
       currentSection = {
         title,
@@ -216,12 +247,12 @@ function parseMarkdownSections(markdown: string): ParsedSection[] {
       currentSection.fullContent += line + "\n"
     }
   }
-  
+
   if (currentSection) {
     currentSection.content = currentSection.content.trim()
     currentSection.fullContent = currentSection.fullContent.trim()
     sections.push(currentSection)
   }
-  
+
   return sections
 }
