@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Sparkles, TrendingUp, Target, Clock, Share2, RefreshCw, AlertCircle, Users, Brain } from "lucide-react"
+import { Sparkles, TrendingUp, Target, Clock, Share2, RefreshCw, AlertCircle, Brain } from "lucide-react"
 
 interface UrlStats {
   shortCode: string
@@ -54,11 +54,6 @@ interface SiteInsightData {
 
 interface MarketingInsightData {
   targetAnalysis: string
-  modelInfo?: ModelInfo | null
-}
-
-interface SegmentationInsightData {
-  segmentationAnalysis: string
   modelInfo?: ModelInfo | null
 }
 
@@ -144,19 +139,16 @@ export function AiInsights({ analytics, selectedUrl }: AiInsightsProps) {
   const [referrerInsights, setReferrerInsights] = useState<ReferrerInsightData | null>(null)
   const [siteInsights, setSiteInsights] = useState<SiteInsightData | null>(null)
   const [marketingInsights, setMarketingInsights] = useState<MarketingInsightData | null>(null)
-  const [segInsights, setSegInsights] = useState<SegmentationInsightData | null>(null)
   
   const [isLoadingTraffic, setIsLoadingTraffic] = useState(false)
   const [isLoadingReferrer, setIsLoadingReferrer] = useState(false)
   const [isLoadingSite, setIsLoadingSite] = useState(false)
   const [isLoadingMarketing, setIsLoadingMarketing] = useState(false)
-  const [isLoadingSeg, setIsLoadingSeg] = useState(false)
   
   const [errorTraffic, setErrorTraffic] = useState("")
   const [errorReferrer, setErrorReferrer] = useState("")
   const [errorSite, setErrorSite] = useState("")
   const [errorMarketing, setErrorMarketing] = useState("")
-  const [errorSeg, setErrorSeg] = useState("")
 
   const currentUrlStats = analytics.urlStats.find(u => u.shortCode === selectedUrl)
 
@@ -254,27 +246,6 @@ export function AiInsights({ analytics, selectedUrl }: AiInsightsProps) {
       setErrorMarketing(err instanceof Error ? err.message : "오류가 발생했습니다")
     } finally {
       setIsLoadingMarketing(false)
-    }
-  }
-
-  const generateSegInsights = async () => {
-    setIsLoadingSeg(true)
-    setErrorSeg("")
-
-    try {
-      const response = await fetch("/api/ai/insights", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "segmentation" })
-      })
-
-      if (!response.ok) throw new Error("AI 분석 생성에 실패했습니다")
-      const data = await response.json()
-      setSegInsights(data)
-    } catch (err) {
-      setErrorSeg(err instanceof Error ? err.message : "오류가 발생했습니다")
-    } finally {
-      setIsLoadingSeg(false)
     }
   }
 
@@ -461,62 +432,7 @@ export function AiInsights({ analytics, selectedUrl }: AiInsightsProps) {
         )}
       </div>
 
-      {/* Section 4: 고객 세그멘테이션 */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-            <Users className="h-4 w-4 text-primary" />
-          </div>
-          <h2 className="text-xl font-semibold text-foreground">고객 세그멘테이션</h2>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Users className="h-5 w-5 text-primary" />
-                <CardTitle className="text-foreground">세그멘테이션 분석</CardTitle>
-              </div>
-              <Button 
-                size="sm" 
-                onClick={generateSegInsights} 
-                disabled={isLoadingSeg}
-              >
-                {isLoadingSeg ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-            <CardDescription>
-              Bedrock(Claude) AI 기반 종합 분석
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {segInsights?.modelInfo && <ModelInfoBadge modelInfo={segInsights.modelInfo} />}
-            {errorSeg && (
-              <div className="flex items-center gap-2 text-destructive">
-                <AlertCircle className="h-4 w-4" />
-                <span className="text-sm">{errorSeg}</span>
-              </div>
-            )}
-            {segInsights?.segmentationAnalysis ? (
-              <div className="rounded-lg bg-muted/50 p-4">
-                <FormattedInsight text={segInsights.segmentationAnalysis} />
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4">
-                <p className="text-center text-sm text-muted-foreground">
-                  버튼을 클릭하여 AI 분석을 시작하세요
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Section 5: 전체 사이트 분석 */}
+      {/* Section 4: 전체 사이트 분석 */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
